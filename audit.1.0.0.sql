@@ -1,9 +1,11 @@
-USE Sandbox
+EXECUTE sqpkg.sp_create_package 'audit'
+	,'Audit'
+	,'1.0.0'
 GO
-EXECUTE sqpkg.sp_create_package 'audit','Audit','1.0.0'
-GO
+
 CREATE SCHEMA [#audit]
 GO
+
 CREATE PROCEDURE [#audit].[sp_alter_audit_on] (
 	@source_table SYSNAME
 	,@source_schema SYSNAME = 'dbo'
@@ -13,6 +15,7 @@ CREATE PROCEDURE [#audit].[sp_alter_audit_on] (
 	)
 AS
 SET NOCOUNT ON
+SET @destination_table = ISNULL(@destination_table, @source_table)
 
 DECLARE @source_qualified SYSNAME = '[' + @source_schema + '].[' + @source_table + ']'
 DECLARE @source_trigger SYSNAME = '[' + @source_schema + '].[' + @source_table + '_audit]'
@@ -194,7 +197,7 @@ END
 	ELSE
 	BEGIN
 		RAISERROR (
-				'Unable to locate source table %s'
+				'Unable to locate destination table %s'
 				,10
 				,- 1
 				,@destination_qualified
@@ -211,8 +214,14 @@ BEGIN
 			)
 END
 GO
-EXECUTE sqpkg.sp_register_package_object 'Audit','sp_alter_audit_on','#audit',0,1
+
+EXECUTE sqpkg.sp_register_package_object 'Audit'
+	,'sp_alter_audit_on'
+	,'#audit'
+	,0
+	,1
 GO
+
 CREATE PROCEDURE [#audit].[sp_create_audit_on] (
 	@source_table SYSNAME
 	,@source_schema SYSNAME = 'dbo'
@@ -307,8 +316,14 @@ BEGIN
 			)
 END
 GO
-EXECUTE sqpkg.sp_register_package_object 'Audit','sp_create_audit_on','#audit',0,1
+
+EXECUTE sqpkg.sp_register_package_object 'Audit'
+	,'sp_create_audit_on'
+	,'#audit'
+	,0
+	,1
 GO
+
 CREATE PROCEDURE [#audit].[sp_drop_audit_on] (
 	@source_table SYSNAME
 	,@source_schema SYSNAME = 'dbo'
@@ -404,8 +419,14 @@ BEGIN
 			)
 END
 GO
-EXECUTE sqpkg.sp_register_package_object 'Audit','sp_drop_audit_on','#audit',0,1
+
+EXECUTE sqpkg.sp_register_package_object 'Audit'
+	,'sp_drop_audit_on'
+	,'#audit'
+	,0
+	,1
 GO
+
 CREATE PROCEDURE [#audit].[sp_purge_expired]
 AS
 SET NOCOUNT ON
@@ -458,10 +479,157 @@ BEGIN
 	WHERE [Id] = @id
 END
 GO
-EXECUTE sqpkg.sp_register_package_object 'Audit','sp_purge_expired','#audit',0,1
+
+EXECUTE sqpkg.sp_register_package_object 'Audit'
+	,'sp_purge_expired'
+	,'#audit'
+	,0
+	,1
 GO
-SELECT * FROM sqpkg.package
-SELECT * FROM sqpkg.package_object
+
+CREATE PROCEDURE [#audit].[sp_enable_audit_on] (
+	@source_table SYSNAME
+	,@source_schema SYSNAME = 'dbo'
+	)
+AS
+SET NOCOUNT ON
+
+DECLARE @source_qualified SYSNAME = '[' + @source_schema + '].[' + @source_table + ']'
+DECLARE @destination_qualified AS SYSNAME = '[audit].[' + @source_table + ']'
+DECLARE @sql NVARCHAR(MAX)
+
+IF EXISTS (
+		SELECT 1
+		FROM sys.tables
+		WHERE object_id = OBJECT_ID(@source_qualified)
+		)
+BEGIN
+	BEGIN TRANSACTION
+
+	SELECT @destination_qualified = CAST(value AS NVARCHAR(2048))
+	FROM sys.fn_listextendedproperty('audit.destination', 'SCHEMA', @source_schema, 'TABLE', @source_table, DEFAULT, DEFAULT)
+
+	IF @destination_qualified IS NOT NULL
+	BEGIN
+		DECLARE @source_trigger SYSNAME = '[' + @source_schema + '].[' + @source_table + '_audit]'
+
+		IF EXISTS (
+				SELECT 1
+				FROM sys.triggers
+				WHERE object_id = OBJECT_ID(@source_trigger)
+					AND parent_id = OBJECT_ID(@source_qualified)
+				)
+		BEGIN
+			SET @sql = 'ENABLE TRIGGER ' + @source_trigger +' ON '+ @source_qualified
+
+			PRINT 'Enabling audit trigger on ' + @source_qualified
+			PRINT @sql
+
+			EXECUTE sp_executesql @sql
+		END
+
+		COMMIT TRANSACTION
+	END
+	ELSE
+	BEGIN
+		RAISERROR (
+				'Unable to locate audit table on %s'
+				,10
+				,- 1
+				,@source_qualified
+				)
+	END
+END
+ELSE
+BEGIN
+	RAISERROR (
+			'Unable to locate source table %s'
+			,10
+			,- 1
+			,@source_qualified
+			)
+END
 GO
-EXECUTE sqpkg.sp_drop_package 'audit'
+
+EXECUTE sqpkg.sp_register_package_object 'Audit'
+	,'sp_enable_audit_on'
+	,'#audit'
+	,0
+	,1
+GO 
+
+CREATE PROCEDURE [#audit].[sp_disable_audit_on] (
+	@source_table SYSNAME
+	,@source_schema SYSNAME = 'dbo'
+	)
+AS
+SET NOCOUNT ON
+
+DECLARE @source_qualified SYSNAME = '[' + @source_schema + '].[' + @source_table + ']'
+DECLARE @destination_qualified AS SYSNAME = '[audit].[' + @source_table + ']'
+DECLARE @sql NVARCHAR(MAX)
+
+IF EXISTS (
+		SELECT 1
+		FROM sys.tables
+		WHERE object_id = OBJECT_ID(@source_qualified)
+		)
+BEGIN
+	BEGIN TRANSACTION
+
+	SELECT @destination_qualified = CAST(value AS NVARCHAR(2048))
+	FROM sys.fn_listextendedproperty('audit.destination', 'SCHEMA', @source_schema, 'TABLE', @source_table, DEFAULT, DEFAULT)
+
+	IF @destination_qualified IS NOT NULL
+	BEGIN
+		DECLARE @source_trigger SYSNAME = '[' + @source_schema + '].[' + @source_table + '_audit]'
+
+		IF EXISTS (
+				SELECT 1
+				FROM sys.triggers
+				WHERE object_id = OBJECT_ID(@source_trigger)
+					AND parent_id = OBJECT_ID(@source_qualified)
+				)
+		BEGIN
+			SET @sql = 'DISABLE TRIGGER ' + @source_trigger +' ON '+ @source_qualified
+
+			PRINT 'Disabling audit trigger on ' + @source_qualified
+			PRINT @sql
+
+			EXECUTE sp_executesql @sql
+		END
+
+		COMMIT TRANSACTION
+	END
+	ELSE
+	BEGIN
+		RAISERROR (
+				'Unable to locate audit table on %s'
+				,10
+				,- 1
+				,@source_qualified
+				)
+	END
+END
+ELSE
+BEGIN
+	RAISERROR (
+			'Unable to locate source table %s'
+			,10
+			,- 1
+			,@source_qualified
+			)
+END
 GO
+
+EXECUTE sqpkg.sp_register_package_object 'Audit'
+	,'sp_disable_audit_on'
+	,'#audit'
+	,0
+	,1
+GO 
+
+DROP SCHEMA [#audit]
+GO
+
+
